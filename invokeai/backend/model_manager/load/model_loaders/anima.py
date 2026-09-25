@@ -1,6 +1,7 @@
 # Copyright (c) 2024, Lincoln D. Stein and the InvokeAI Development Team
 """Class for Anima model loading in InvokeAI."""
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -77,7 +78,8 @@ def _filter_non_model_keys(sd: dict) -> dict:
     }
 
 
-# Anima's fixed transformer architecture. Kept at module level so tests can instantiate the real
+# Anima's base transformer architecture. The checkpoint determines num_blocks at load time.
+# Kept at module level so tests can instantiate the real
 # module graph (e.g. to pin `_skip_layerwise_casting_patterns` to actual dotted module paths)
 # without duplicating these values.
 ANIMA_TRANSFORMER_CONFIG = {
@@ -107,6 +109,26 @@ ANIMA_TRANSFORMER_CONFIG = {
     "extra_per_block_abs_pos_emb": False,
     "image_model": "anima",
 }
+
+
+_ANIMA_BLOCK_KEY = re.compile(r"^blocks\.(\d+)\.")
+
+
+def _get_anima_num_blocks(sd: dict) -> int:
+    """Read the DiT depth from transformer weights (28 in Anima, 40 in Anima 2.9B)."""
+    block_indices = {
+        int(match.group(1))
+        for key in sd
+        if isinstance(key, str) and (match := _ANIMA_BLOCK_KEY.match(key)) is not None
+    }
+    if not block_indices:
+        # The completeness check below will reject a real checkpoint with no DiT blocks.
+        return ANIMA_TRANSFORMER_CONFIG["num_blocks"]
+
+    num_blocks = max(block_indices) + 1
+    if len(block_indices) != num_blocks:
+        raise ValueError("Anima transformer checkpoint has missing DiT block indices")
+    return num_blocks
 
 
 @ModelLoaderRegistry.register(base=BaseModelType.Anima, type=ModelType.Main, format=ModelFormat.Checkpoint)
@@ -158,9 +180,16 @@ class AnimaCheckpointModel(ModelLoader):
         # Drop runtime-derived buffers and exporter metadata that aren't model weights.
         sd = _filter_non_model_keys(sd)
 
-        # Create an empty AnimaTransformer with Anima's default architecture parameters
+        # Expanded Anima checkpoints have more DiT blocks than the original 28. Creating
+        # only 28 would silently discard their extra weights with strict=False and produce
+        # broken images.
+        num_blocks = _get_anima_num_blocks(sd)
+        transformer_config = {**ANIMA_TRANSFORMER_CONFIG, "num_blocks": num_blocks}
+        logger.info("Loading Anima transformer with %d DiT blocks", num_blocks)
+
+        # Create an empty AnimaTransformer with the checkpoint's architecture.
         with accelerate.init_empty_weights():
-            model = AnimaTransformer(**ANIMA_TRANSFORMER_CONFIG)
+            model = AnimaTransformer(**transformer_config)
 
         # Determine safe dtype
         target_device = TorchDevice.choose_torch_device()
