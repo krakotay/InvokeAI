@@ -140,6 +140,12 @@ class AnimaCheckpointModel(ModelLoader):
     the AnimaTransformer model with the correct architecture parameters.
     """
 
+    def _allow_partial_loading(self) -> bool:
+        # Evict the whole transformer when the VAE needs memory. Streaming a few
+        # remaining blocks defeats compilation and can leave too little decode
+        # workspace on small GPUs.
+        return not (self._app_config.anima_require_full_vram or self._app_config.anima_compile_blocks)
+
     def _load_model(
         self,
         config: AnyModelConfig,

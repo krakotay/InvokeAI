@@ -377,6 +377,7 @@ class ModelLoader(ModelLoaderBase):
                 model=loaded_model,
                 execution_device=execution_device,
                 claim_admission=True,
+                allow_partial_loading=self._allow_partial_loading(),
             )
             # Retrieve immediately, and hold the admission claim across the retrieval: the claim
             # shields the new record until this frame's own claim takes over, so nothing — a peer's
@@ -721,6 +722,10 @@ class ModelLoader(ModelLoaderBase):
                 f"Could not build meta-weight shell for {type(model).__name__} ({e!r}); model won't be adopted."
             )
             return None
+
+    def _allow_partial_loading(self) -> bool:
+        """Allow loaders to require full residency without changing other cached models."""
+        return True
 
     # This needs to be implemented in the subclass
     def _load_model(

@@ -17,6 +17,7 @@ Key differences from Z-Image denoise:
 """
 
 import math
+import os
 import sys
 from contextlib import ExitStack
 from typing import Callable, Iterator, Optional
@@ -43,6 +44,7 @@ from invokeai.app.invocations.model import TransformerField
 from invokeai.app.invocations.primitives import LatentsOutput
 from invokeai.app.services.shared.invocation_context import InvocationContext
 from invokeai.backend.anima.anima_transformer_patch import patch_anima_for_regional_prompting
+from invokeai.backend.anima.compile import compiled_anima_blocks
 from invokeai.backend.anima.conditioning_data import AnimaRegionalTextConditioning, AnimaTextConditioning
 from invokeai.backend.anima.control_net_lllite import (
     AnimaControlNetLLLite,
@@ -539,6 +541,15 @@ class AnimaDenoiseInvocation(BaseInvocation):
     def _run_diffusion(self, context: InvocationContext) -> torch.Tensor:
         device = TorchDevice.choose_torch_device()
         inference_dtype = TorchDevice.choose_anima_inference_dtype(device)
+        compile_blocks = context.config.get().anima_compile_blocks
+        if compile_blocks and device.type != "cuda":
+            raise RuntimeError("anima_compile_blocks requires CUDA")
+        profile_setting = os.environ.get("INVOKEAI_ANIMA_PROFILE_STEPS", "0")
+        if profile_setting not in ("0", "1"):
+            raise ValueError("INVOKEAI_ANIMA_PROFILE_STEPS must be 0 or 1")
+        profile_steps = profile_setting == "1"
+        if profile_steps and device.type != "cuda":
+            raise RuntimeError("INVOKEAI_ANIMA_PROFILE_STEPS requires a CUDA device")
 
         if self.denoising_start >= self.denoising_end:
             raise ValueError(
@@ -546,6 +557,8 @@ class AnimaDenoiseInvocation(BaseInvocation):
             )
 
         lllite_fields = self._normalize_control_lllite(self.control_lllite)
+        if compile_blocks and lllite_fields:
+            raise RuntimeError("anima_compile_blocks is not supported with regional prompting or LLLite")
 
         transformer_info = context.models.load(self.transformer.transformer)
 
@@ -563,6 +576,8 @@ class AnimaDenoiseInvocation(BaseInvocation):
             device=device,
         )
         has_regional = len(pos_text_conditionings) > 1 or any(tc.mask is not None for tc in pos_text_conditionings)
+        if compile_blocks and has_regional:
+            raise RuntimeError("anima_compile_blocks is not supported with regional prompting or LLLite")
 
         # Load negative conditioning if CFG is enabled
         do_cfg = not math.isclose(self.guidance_scale, 1.0) and self.negative_conditioning is not None
@@ -687,6 +702,23 @@ class AnimaDenoiseInvocation(BaseInvocation):
                     )
                 )
             (cached_weights, transformer) = exit_stack.enter_context(transformer_info.model_on_device())
+            require_full_vram = context.config.get().anima_require_full_vram or compile_blocks
+            if profile_steps or require_full_vram:
+                cpu_weight_bytes = sum(
+                    tensor.numel() * tensor.element_size()
+                    for tensor in transformer.parameters()
+                    if tensor.device.type == "cpu"
+                )
+                if profile_steps:
+                    context.logger.info(
+                        f"Anima profile: {cpu_weight_bytes / 2**30:.2f} GiB of transformer weights remain in RAM"
+                    )
+                if require_full_vram and cpu_weight_bytes:
+                    raise RuntimeError(
+                        f"Anima transformer has {cpu_weight_bytes / 2**20:.0f} MiB of weights in RAM. "
+                        "Full VRAM residency is required by anima_require_full_vram or anima_compile_blocks; "
+                        "free GPU memory, lower device_working_mem_gb, or disable partial loading."
+                    )
 
             # Prepare the ControlNet-LLLite adapters if provided. Each adapter's
             # conditioning image is built ONCE per generation (not per step).
@@ -771,14 +803,28 @@ class AnimaDenoiseInvocation(BaseInvocation):
             # Apply regional prompting patch if we have regional masks
             exit_stack.enter_context(patch_anima_for_regional_prompting(transformer, regional_extension))
 
+            if compile_blocks:
+                exit_stack.enter_context(compiled_anima_blocks(transformer))
+                context.logger.info(f"Anima: compiling {len(transformer.blocks)} DiT blocks with Inductor")
+
             # Helper to run transformer with pre-computed context (bypasses LLM Adapter)
-            def _run_transformer(ctx: torch.Tensor, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-                return transformer(
+            gpu_pass_events: list[tuple[str, torch.cuda.Event, torch.cuda.Event]] = []
+
+            def _run_transformer(ctx: torch.Tensor, x: torch.Tensor, t: torch.Tensor, phase: str) -> torch.Tensor:
+                start = torch.cuda.Event(enable_timing=True) if profile_steps else None
+                if start is not None:
+                    start.record()
+                output = transformer(
                     x=x.to(transformer.dtype if hasattr(transformer, "dtype") else inference_dtype),
                     timesteps=t,
                     context=ctx,
                     # t5xxl_ids=None skips the LLM Adapter — context is already pre-computed
                 )
+                if start is not None:
+                    end = torch.cuda.Event(enable_timing=True)
+                    end.record()
+                    gpu_pass_events.append((phase, start, end))
+                return output
 
             try:
                 # Bind AFTER LoRA patching so the LLLite modules wrap the patched
@@ -802,10 +848,10 @@ class AnimaDenoiseInvocation(BaseInvocation):
                             [it.sigma_curr * ANIMA_MULTIPLIER], device=device, dtype=inference_dtype
                         ).expand(latents.shape[0])
 
-                        noise_pred_cond = _run_transformer(pos_context, latents, timestep).float()
+                        noise_pred_cond = _run_transformer(pos_context, latents, timestep, "positive").float()
 
                         if do_cfg and neg_context is not None:
-                            noise_pred_uncond = _run_transformer(neg_context, latents, timestep).float()
+                            noise_pred_uncond = _run_transformer(neg_context, latents, timestep, "negative").float()
                             noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_cond - noise_pred_uncond)
                         else:
                             noise_pred = noise_pred_cond
@@ -858,10 +904,10 @@ class AnimaDenoiseInvocation(BaseInvocation):
                             [sigma_curr * ANIMA_MULTIPLIER], device=device, dtype=inference_dtype
                         ).expand(latents.shape[0])
 
-                        noise_pred_cond = _run_transformer(pos_context, latents, timestep).float()
+                        noise_pred_cond = _run_transformer(pos_context, latents, timestep, "positive").float()
 
                         if do_cfg and neg_context is not None:
-                            noise_pred_uncond = _run_transformer(neg_context, latents, timestep).float()
+                            noise_pred_uncond = _run_transformer(neg_context, latents, timestep, "negative").float()
                             noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_cond - noise_pred_uncond)
                         else:
                             noise_pred = noise_pred_cond
@@ -890,6 +936,16 @@ class AnimaDenoiseInvocation(BaseInvocation):
                                 latents=latents_preview.squeeze(2),
                             ),
                         )
+                if profile_steps:
+                    torch.cuda.synchronize(device)
+                    for phase in ("positive", "negative"):
+                        durations = [start.elapsed_time(end) for label, start, end in gpu_pass_events if label == phase]
+                        if durations:
+                            context.logger.info(
+                                f"Anima profile: {phase} transformer passes={len(durations)} "
+                                f"mean={sum(durations) / len(durations):.1f} ms "
+                                f"min={min(durations):.1f} ms max={max(durations):.1f} ms"
+                            )
             finally:
                 # The adapter models are shared via the model cache — always undo
                 # the forward swaps and drop the per-run cond state. unbind() is

@@ -879,6 +879,7 @@ class ModelCache:
         execution_device: Optional[torch.device] = None,
         prefetch: bool = False,
         claim_admission: bool = False,
+        allow_partial_loading: bool = True,
     ) -> Optional[FirstUseClaim]:
         """Add a model to the cache.
 
@@ -887,6 +888,8 @@ class ModelCache:
             model: The model to cache
             execution_device: Optional device to use for this specific model. If None, uses the cache's default
                 execution_device. Use torch.device("cpu") to force a model to run on CPU.
+            allow_partial_loading: Whether this model may stream weights. False uses full-model loading and
+                unloading without disabling partial loading for other models in the cache.
             prefetch: The model is being cached opportunistically (e.g. the unused submodels of a
                 single-file pipeline load) and no loader will retrieve it after this call. It is
                 admitted without the post-admission grace, so budget reconciles may evict it
@@ -1043,7 +1046,12 @@ class ModelCache:
             )
 
         # Wrap model.
-        if isinstance(model, torch.nn.Module) and supports_partial_loading and self._enable_partial_loading:
+        if (
+            isinstance(model, torch.nn.Module)
+            and supports_partial_loading
+            and self._enable_partial_loading
+            and allow_partial_loading
+        ):
             wrapped_model = CachedModelWithPartialLoad(
                 model,
                 effective_execution_device,
