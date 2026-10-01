@@ -5,6 +5,22 @@ This measures the same 40-block Anima checkpoint on the same branch with
 residency. Checkpoint weights, numerical dtype, sampler, steps and CFG are
 unchanged. The default configuration leaves compilation disabled.
 
+## Enabling compilation
+
+Select an Anima model, open **Generate → Advanced**, and enable
+**Compile Anima (faster inference)**. The toggle is off by default, is saved
+with generation parameters, and sends an explicit `compile_blocks` boolean to
+the denoiser. Switching it off overrides the server compilation default for that
+job. Restart the backend and rebuild the frontend when updating from a version
+without this control.
+
+Workflows/API graphs may set `anima_denoise.compile_blocks` to `true` or `false`.
+Omitting it (or setting `null`) preserves the `anima_compile_blocks` server
+setting. Compiled jobs request full model loading and whole-model eviction
+independently of the server's partial-loading configuration. An eager job can
+use partial loading again once the previous job has released the transformer.
+The first run and new shapes can take longer due to compilation.
+
 ## Environment
 
 - RTX 5060, 8151 MiB VRAM; NVIDIA 610.57.04.
@@ -80,13 +96,23 @@ and hooks are preserved; original forwards are restored on success and errors.
 Using the same pinned dependency overlay in separate checkouts:
 
 - Clean upstream: 553 passed, 89 skipped.
-- Anima branch: 563 passed, 89 skipped.
+- Anima branch after the generation toggle: 569 passed, 89 skipped.
 
 The shared suite covers model loading/cache, Anima transformer adapters,
-denoising, scheduler dispatch, VAE and text encoding. The ten added tests cover
+denoising, scheduler dispatch, VAE and text encoding. The sixteen added tests cover
 40-block checkpoint depth, missing blocks, scoped loading policy, parameter and
-hook preservation, and restoration after inference/compilation failures.
+hook preservation, restoration after inference/compilation failures, per-job
+compilation overrides, and full-residency policy transitions.
+The frontend build, all lint checks, and 2343 frontend tests also passed; graph
+tests verify that both toggle positions reach the Anima denoiser.
 Ruff and `git diff --check` passed for the changed Python files.
+
+A separate runtime smoke test used both server flags set to `false` and partial
+loading enabled. Three 992×1320, four-step jobs completed in the sequence
+compiled → eager → compiled, including both toggle positions queued from the
+Generate UI. This verified per-job overrides, warm cache policy changes, and VAE
+decode without OOM. The UI toggle also survived a page reload. These smoke runs
+are separate from the 24-step performance measurements above.
 
 The existing development environment had Diffusers 0.41.0.dev0 and Transformers
 5.17.0, which caused the same five unrelated dependency-contract failures on both

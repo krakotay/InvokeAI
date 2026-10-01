@@ -1006,6 +1006,8 @@
         "qwenImageQwenVLEncoderPlaceholder": "VAE/кодировщик из основной модели"
     },
     "parameters": {
+        "animaCompileBlocks": "Компиляция Anima (ускорение)",
+        "animaCompileBlocksHelp": "Нужна NVIDIA GPU и достаточно VRAM для всей модели. Первая генерация дольше из-за компиляции, последующие быстрее. При одинаковом seed изображения могут отличаться. Региональные промпты и адаптеры LLLite не поддерживаются.",
         "images": "Изображения",
         "steps": "Шаги",
         "cfgScale": "Шкала точности (CFG)",

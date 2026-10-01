@@ -25,9 +25,11 @@ const animaQwen3EncoderModel = { key: 'anima-qwen3', name: 'Qwen3 0.6B', base: '
 const defaultParams: {
   cfgScale: number | number[];
   steps: number;
+  animaCompileBlocks: boolean;
 } = {
   cfgScale: 4,
   steps: 20,
+  animaCompileBlocks: false,
 };
 
 let params = { ...defaultParams };
@@ -110,6 +112,17 @@ describe('buildAnimaGraph', () => {
   afterEach(() => {
     nextId = 0;
     params = { ...defaultParams };
+  });
+
+  it.each([false, true])('sends the compilation toggle (%s) to the denoiser', async (enabled) => {
+    params = { ...defaultParams, animaCompileBlocks: enabled };
+    const { g } = await buildAnimaGraph({
+      generationMode: 'txt2img',
+      manager: null,
+      state: { system: { shouldUseNSFWChecker: false, shouldUseWatermarker: false } } as never,
+    });
+    const denoise = Object.values(g.getGraph().nodes).find((node) => node.type === 'anima_denoise');
+    expect(denoise).toMatchObject({ compile_blocks: enabled });
   });
 
   describe('CFG gating', () => {

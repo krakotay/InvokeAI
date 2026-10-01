@@ -157,16 +157,17 @@ class LoadedModelWithoutConfig:
 
     @contextmanager
     def model_on_device(
-        self, working_mem_bytes: Optional[int] = None
+        self, working_mem_bytes: Optional[int] = None, *, force_full_load: bool = False
     ) -> Generator[Tuple[Optional[Dict[str, torch.Tensor]], AnyModel], None, None]:
         """Return a tuple consisting of the model's state dict (if it exists) and the locked model on execution device.
 
         :param working_mem_bytes: The amount of working memory to keep available on the compute device when loading the
             model.
+        :param force_full_load: Load and subsequently evict all weights together, even if this model supports streaming.
         """
         # See __enter__ for why the VRAM load is wrapped in the read lock.
         with MODEL_LOAD_LOCK.read_lock():
-            self._cache.lock(self._cache_record, working_mem_bytes)
+            self._cache.lock(self._cache_record, working_mem_bytes, force_full_load=force_full_load)
         self._end_first_use_window()
         try:
             self.repair_required_tensors_on_device()

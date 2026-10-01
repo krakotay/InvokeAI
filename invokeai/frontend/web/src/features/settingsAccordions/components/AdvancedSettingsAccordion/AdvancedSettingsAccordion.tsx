@@ -19,6 +19,7 @@ import {
   selectParamsSlice,
   selectVAEKey,
 } from 'features/controlLayers/store/paramsSlice';
+import { ParamAnimaCompileToggle } from 'features/parameters/components/Advanced/ParamAnimaCompileToggle';
 import ParamAnimaModelSelect from 'features/parameters/components/Advanced/ParamAnimaModelSelect';
 import ParamCFGRescaleMultiplier from 'features/parameters/components/Advanced/ParamCFGRescaleMultiplier';
 import ParamCLIPEmbedModelSelect from 'features/parameters/components/Advanced/ParamCLIPEmbedModelSelect';
@@ -214,6 +215,7 @@ export const AdvancedSettingsAccordion = memo(() => {
         {isAnima && (
           <FormControlGroup>
             <ParamAnimaModelSelect />
+            <ParamAnimaCompileToggle />
           </FormControlGroup>
         )}
         {isErnieImage && (

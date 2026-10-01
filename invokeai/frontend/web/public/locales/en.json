@@ -1712,6 +1712,8 @@
         }
     },
     "parameters": {
+        "animaCompileBlocks": "Compile Anima (faster inference)",
+        "animaCompileBlocksHelp": "Requires an NVIDIA GPU and enough VRAM for the whole model. The first generation takes longer to compile; later runs are faster. Images may differ with the same seed. Regional prompts and LLLite adapters are unsupported.",
         "aspect": "Aspect",
         "samplerPreset": "Sampler Preset",
         "colorPalette": "Color Palette",

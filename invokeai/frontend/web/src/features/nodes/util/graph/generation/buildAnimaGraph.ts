@@ -110,6 +110,7 @@ export const buildAnimaGraph = async (arg: GraphBuilderArg): Promise<GraphBuilde
     guidance_scale,
     steps,
     scheduler: animaScheduler,
+    compile_blocks: params.animaCompileBlocks,
   });
   const l2i = g.addNode({
     type: 'anima_l2i',

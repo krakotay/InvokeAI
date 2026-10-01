@@ -3733,6 +3733,12 @@ export type components = {
              */
             steps?: number;
             /**
+             * Compile Anima
+             * @description Compile transformer blocks for faster CUDA inference. Requires full VRAM residency; the first run is slower and outputs may differ. Null uses the server setting.
+             * @default null
+             */
+            compile_blocks?: boolean | null;
+            /**
              * Seed
              * @description Randomness seed for reproducibility.
              * @default 0
@@ -3860,6 +3866,12 @@ export type components = {
              * @default 30
              */
             steps?: number;
+            /**
+             * Compile Anima
+             * @description Compile transformer blocks for faster CUDA inference. Requires full VRAM residency; the first run is slower and outputs may differ. Null uses the server setting.
+             * @default null
+             */
+            compile_blocks?: boolean | null;
             /**
              * Seed
              * @description Randomness seed for reproducibility.
@@ -19391,6 +19403,18 @@ export type components = {
              * @default true
              */
             enable_partial_loading?: boolean;
+            /**
+             * Anima Require Full Vram
+             * @description Fail Anima generation if any transformer weights remain in RAM after loading. Use with a measured device_working_mem_gb value when full VRAM residency is required for performance.
+             * @default false
+             */
+            anima_require_full_vram?: boolean;
+            /**
+             * Anima Compile Blocks
+             * @description Compile each Anima DiT block forward with torch.compile (Inductor) for faster denoising. Requires CUDA, Triton and full VRAM residency; regional prompting and LLLite are unsupported. Preserves eager low-precision casts, but outputs can still differ numerically. Compiler errors stop generation.
+             * @default false
+             */
+            anima_compile_blocks?: boolean;
             /**
              * Keep Ram Copy Of Weights
              * @description Whether to keep a full RAM copy of a model's weights when the model is loaded in VRAM. Keeping a RAM copy increases average RAM usage, but speeds up model switching and LoRA patching (assuming there is sufficient RAM). Set this to False if RAM pressure is consistently high.

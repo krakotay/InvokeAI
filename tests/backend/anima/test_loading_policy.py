@@ -54,3 +54,42 @@ def test_checkpoint_depth(depth):
 def test_checkpoint_depth_rejects_missing_blocks():
     with pytest.raises(ValueError, match="missing DiT block indices"):
         _get_anima_num_blocks({"blocks.0.weight": None, "blocks.2.weight": None})
+
+
+def test_per_generation_full_residency_survives_unlock_for_whole_model_eviction():
+    cache = ModelCache(
+        execution_device="cpu",
+        storage_device="cpu",
+        logger=logging.getLogger(__name__),
+        execution_device_working_mem_gb=0.75,
+        enable_partial_loading=True,
+        keep_ram_copy_of_weights=True,
+    )
+    try:
+        with patch(
+            "invokeai.backend.model_manager.load.model_cache.model_cache._has_dedicated_vram", return_value=True
+        ):
+            cache.put("anima", nn.Linear(2, 2), execution_device=torch.device("cuda:0"))
+        record = cache._cached_models["anima"]
+        assert isinstance(record.cached_model, CachedModelWithPartialLoad)
+        with patch.object(cache, "_load_locked_model"), patch.object(cache, "_log_cache_state"):
+            cache.lock(record, None, force_full_load=True)
+            # A nested default lock must not downgrade the active full-residency user.
+            cache.lock(record, None)
+            assert record.force_full_load
+            cache.unlock(record)
+            cache.unlock(record)
+            with patch.object(record.cached_model, "full_load_to_vram", return_value=24) as load:
+                assert cache._move_model_to_vram(record, 1) == 24
+                load.assert_called_once()
+            with patch.object(record.cached_model, "full_unload_from_vram", return_value=24) as unload:
+                assert cache._move_model_to_ram(record, 1) == 24
+                unload.assert_called_once()
+            cache.lock(record, None)
+            assert not record.force_full_load
+            cache.unlock(record)
+            with patch.object(record.cached_model, "partial_load_to_vram", return_value=1) as partial:
+                cache._move_model_to_vram(record, 1)
+                partial.assert_called_once_with(1)
+    finally:
+        cache.shutdown()

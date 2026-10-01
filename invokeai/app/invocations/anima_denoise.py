@@ -179,7 +179,7 @@ class AnimaInpaintExtension(RectifiedFlowInpaintExtension):
     title="Denoise - Anima",
     tags=["image", "anima"],
     category="image",
-    version="1.8.0",
+    version="1.9.0",
     classification=Classification.Prototype,
 )
 class AnimaDenoiseInvocation(BaseInvocation):
@@ -223,6 +223,12 @@ class AnimaDenoiseInvocation(BaseInvocation):
     width: int = InputField(default=1024, multiple_of=8, description="Width of the generated image.")
     height: int = InputField(default=1024, multiple_of=8, description="Height of the generated image.")
     steps: int = InputField(default=30, gt=0, description="Number of denoising steps. 30 recommended for Anima.")
+    compile_blocks: bool | None = InputField(
+        default=None,
+        title="Compile Anima",
+        description="Compile transformer blocks for faster CUDA inference. Requires full VRAM residency; "
+        "the first run is slower and outputs may differ. Null uses the server setting.",
+    )
     seed: int = InputField(default=0, description="Randomness seed for reproducibility.")
     # ControlNet-LLLite support (e.g. model-level inpaint conditioning, control layers)
     control_lllite: AnimaLLLiteField | list[AnimaLLLiteField] | None = InputField(
@@ -541,7 +547,9 @@ class AnimaDenoiseInvocation(BaseInvocation):
     def _run_diffusion(self, context: InvocationContext) -> torch.Tensor:
         device = TorchDevice.choose_torch_device()
         inference_dtype = TorchDevice.choose_anima_inference_dtype(device)
-        compile_blocks = context.config.get().anima_compile_blocks
+        compile_blocks = (
+            self.compile_blocks if self.compile_blocks is not None else context.config.get().anima_compile_blocks
+        )
         if compile_blocks and device.type != "cuda":
             raise RuntimeError("anima_compile_blocks requires CUDA")
         profile_setting = os.environ.get("INVOKEAI_ANIMA_PROFILE_STEPS", "0")
@@ -701,8 +709,10 @@ class AnimaDenoiseInvocation(BaseInvocation):
                         set_priority=True,
                     )
                 )
-            (cached_weights, transformer) = exit_stack.enter_context(transformer_info.model_on_device())
             require_full_vram = context.config.get().anima_require_full_vram or compile_blocks
+            (cached_weights, transformer) = exit_stack.enter_context(
+                transformer_info.model_on_device(force_full_load=require_full_vram)
+            )
             if profile_steps or require_full_vram:
                 cpu_weight_bytes = sum(
                     tensor.numel() * tensor.element_size()

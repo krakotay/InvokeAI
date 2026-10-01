@@ -19,6 +19,8 @@ class CacheRecord:
     # Model in memory.
     cached_model: CachedModelWithPartialLoad | CachedModelOnlyFullLoad
     _locks: int = 0
+    # Keep whole-model eviction after a full-residency use; reset on the next unlocked load.
+    force_full_load: bool = False
     # Set by ModelCache.drop_model() when the entry was locked at invalidation time.
     # ModelCache.unlock() evicts the entry as soon as the last lock releases so a setting
     # change (e.g. fp8_storage toggled during an in-flight generation) takes effect on the

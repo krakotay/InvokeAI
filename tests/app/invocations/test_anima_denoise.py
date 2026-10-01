@@ -207,3 +207,29 @@ class TestInverseLoglinearEdgeCases:
         # At sigma=0, denominator would be 0 — should hit the epsilon guard
         result_zero = inverse_loglinear_timestep_shift(0.0, 0.0)
         assert isinstance(result_zero, float)
+
+
+@pytest.mark.parametrize(
+    "requested,server,compiled", [(None, True, True), (None, False, False), (True, False, True), (False, True, False)]
+)
+def test_compile_blocks_request_overrides_server_default(monkeypatch, requested, server, compiled):
+    from invokeai.app.invocations.model import TransformerField
+    from invokeai.backend.util.devices import TorchDevice
+
+    monkeypatch.setattr(TorchDevice, "choose_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(TorchDevice, "choose_anima_inference_dtype", lambda device: torch.float32)
+    monkeypatch.setenv("INVOKEAI_ANIMA_PROFILE_STEPS", "0")
+    invocation = AnimaDenoiseInvocation(positive_conditioning=None, transformer=None, compile_blocks=requested)
+
+    invocation.transformer = TransformerField.model_construct(transformer=None)
+
+    def stop_before_loading(*args):
+        raise RuntimeError("passed compile validation")
+
+    context = SimpleNamespace(
+        config=SimpleNamespace(get=lambda: SimpleNamespace(anima_compile_blocks=server)),
+        models=SimpleNamespace(load=stop_before_loading),
+    )
+    expected = "requires CUDA" if compiled else "passed compile validation"
+    with pytest.raises(RuntimeError, match=expected):
+        invocation._run_diffusion(context)

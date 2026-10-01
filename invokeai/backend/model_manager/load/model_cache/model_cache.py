@@ -1852,7 +1852,9 @@ class ModelCache:
 
     @synchronized
     @record_activity
-    def lock(self, cache_entry: CacheRecord, working_mem_bytes: Optional[int]) -> None:
+    def lock(
+        self, cache_entry: CacheRecord, working_mem_bytes: Optional[int], *, force_full_load: bool = False
+    ) -> None:
         """Lock a model for use and move it into VRAM."""
         if cache_entry.key not in self._cached_models:
             self._logger.info(
@@ -1861,6 +1863,10 @@ class ModelCache:
                 "the RAM cache. This is a sign that the model loading order is non-optimal in the invocation code "
                 "(See https://github.com/invoke-ai/InvokeAI/issues/7513)."
             )
+        # Preserve a full-residency requirement while any existing user holds the model.
+        cache_entry.force_full_load = (
+            cache_entry.force_full_load if cache_entry.is_locked else False
+        ) or force_full_load
         # cache_entry = self._cached_models[key]
         cache_entry.lock()
         # End of the post-admission grace: from here the entry is pinned by its lock count, and
@@ -2032,9 +2038,9 @@ class ModelCache:
 
     def _move_model_to_vram(self, cache_entry: CacheRecord, vram_available: int) -> int:
         try:
-            if isinstance(cache_entry.cached_model, CachedModelWithPartialLoad):
+            if isinstance(cache_entry.cached_model, CachedModelWithPartialLoad) and not cache_entry.force_full_load:
                 return cache_entry.cached_model.partial_load_to_vram(vram_available)
-            elif isinstance(cache_entry.cached_model, CachedModelOnlyFullLoad):  # type: ignore
+            elif isinstance(cache_entry.cached_model, CachedModelOnlyFullLoad) or cache_entry.force_full_load:  # type: ignore
                 # Partial load is not supported, so we have not choice but to try and fit it all into VRAM.
                 #
                 # On an integrated GPU that gamble is not survivable: "VRAM" is system RAM, so
@@ -2080,7 +2086,7 @@ class ModelCache:
         keep_required_weights_in_vram: bool | None = None,
     ) -> int:
         try:
-            if isinstance(cache_entry.cached_model, CachedModelWithPartialLoad):
+            if isinstance(cache_entry.cached_model, CachedModelWithPartialLoad) and not cache_entry.force_full_load:
                 return cache_entry.cached_model.partial_unload_from_vram(
                     vram_bytes_to_free,
                     keep_required_weights_in_vram=(
@@ -2089,7 +2095,7 @@ class ModelCache:
                         else keep_required_weights_in_vram
                     ),
                 )
-            elif isinstance(cache_entry.cached_model, CachedModelOnlyFullLoad):  # type: ignore
+            elif isinstance(cache_entry.cached_model, CachedModelOnlyFullLoad) or cache_entry.force_full_load:
                 return cache_entry.cached_model.full_unload_from_vram()
             else:
                 raise ValueError(f"Unsupported cached model type: {type(cache_entry.cached_model)}")

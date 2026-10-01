@@ -359,6 +359,9 @@ const slice = createSlice({
       }
       state.animaLLLiteWeight = result.data;
     },
+    setAnimaCompileBlocks: (state, action: PayloadAction<boolean>) => {
+      state.animaCompileBlocks = action.payload;
+    },
     setAnimaScheduler: (
       state,
       action: PayloadAction<'euler' | 'heun' | 'dpmpp_2m' | 'dpmpp_2m_sde' | 'er_sde' | 'lcm'>
@@ -969,6 +972,7 @@ export const {
   animaLLLiteModelSelected,
   animaLLLiteWeightChanged,
   setAnimaScheduler,
+  setAnimaCompileBlocks,
 } = slice.actions;
 
 /**
@@ -1232,6 +1236,7 @@ export const selectKrea2VaeModel = createParamsSelector((params) => params.krea2
 export const selectKrea2Qwen3VlEncoderModel = createParamsSelector((params) => params.krea2Qwen3VlEncoderModel);
 export const selectAnimaVaeModel = createParamsSelector((params) => params.animaVaeModel);
 export const selectAnimaQwen3EncoderModel = createParamsSelector((params) => params.animaQwen3EncoderModel);
+export const selectAnimaCompileBlocks = createParamsSelector((params) => params.animaCompileBlocks);
 export const selectAnimaScheduler = createParamsSelector((params) => params.animaScheduler);
 export const selectAnimaLLLiteModel = createParamsSelector((params) => params.animaLLLiteModel);
 export const selectAnimaLLLiteWeight = createParamsSelector((params) => params.animaLLLiteWeight);

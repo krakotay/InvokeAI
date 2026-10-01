@@ -25,10 +25,12 @@ class FakeCache:
     def __init__(self):
         self.lock_calls = 0
         self.unlock_calls = 0
+        self.force_full_load = False
 
-    def lock(self, cache_record: CacheRecord, working_mem_bytes: int | None) -> None:
+    def lock(self, cache_record: CacheRecord, working_mem_bytes: int | None, *, force_full_load: bool = False) -> None:
         del cache_record, working_mem_bytes
         self.lock_calls += 1
+        self.force_full_load = force_full_load
 
     def unlock(self, cache_record: CacheRecord) -> None:
         del cache_record
@@ -95,3 +97,16 @@ def test_enter_unlocks_if_repair_raises():
 
     assert fake_cache.lock_calls == 1
     assert fake_cache.unlock_calls == 1
+
+
+def test_model_on_device_forwards_full_residency_and_unlocks_after_failure():
+    cached_model = CachedModelOnlyFullLoad(
+        model=torch.nn.Linear(4, 4), compute_device=torch.device("cpu"), total_bytes=80, keep_ram_copy=False
+    )
+    cache = FakeCache()
+    loaded_model = LoadedModelWithoutConfig(CacheRecord(key="test", cached_model=cached_model), cache=cache)
+    with pytest.raises(RuntimeError, match="inference failed"):
+        with loaded_model.model_on_device(force_full_load=True):
+            assert cache.force_full_load is True
+            raise RuntimeError("inference failed")
+    assert cache.unlock_calls == 1

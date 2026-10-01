@@ -913,6 +913,7 @@ export const zParamsState = z.object({
   animaVaeModel: zParameterVAEModel.nullable(), // Optional: Separate QwenImage/FLUX VAE for Anima
   animaQwen3EncoderModel: zModelIdentifierField.nullable(), // Optional: Separate Qwen3 0.6B Encoder for Anima
   animaScheduler: zParameterAnimaScheduler,
+  animaCompileBlocks: z.boolean().default(false),
   animaLLLiteModel: zModelIdentifierField.nullable().default(null), // Optional: ControlNet-LLLite inpaint adapter for Anima
   animaLLLiteWeight: z.number().min(-10).max(10).default(1),
   // FLUX.2 VAE shared by Klein and [dev] — both use the same 32-channel AutoencoderKLFlux2 pool,
@@ -1049,6 +1050,7 @@ export const getInitialParamsState = (): ParamsState => ({
   animaVaeModel: null,
   animaQwen3EncoderModel: null,
   animaScheduler: 'euler',
+  animaCompileBlocks: false,
   animaLLLiteModel: null,
   animaLLLiteWeight: 1,
   flux2VaeModel: null,
